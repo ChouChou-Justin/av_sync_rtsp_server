@@ -19,55 +19,24 @@ v4l2H264MediaSubsession::~v4l2H264MediaSubsession() {
 FramedSource* v4l2H264MediaSubsession::createNewStreamSource(unsigned clientSessionId, unsigned& estBitrate) {
     estBitrate = 1000;
     
-    // For initial setup phase
-    if (clientSessionId == 0) {
-        logMessage("Initial setup phase with session 0");
-        // We need basic setup for session 0
-        if (!fCapture->hasSpsPps()) {
-            fCapture->stopCapture();
-            fCapture->reset();
-            fCapture->startCapture();
-            if (!fCapture->extractSpsPps()) {
-                logMessage("Failed to extract SPS/PPS for setup phase");
-                fCapture->stopCapture();
-                return nullptr;
-            }
-        }
-    }
+    logMessage("Creating stream source for session: " + std::to_string(clientSessionId));
     
-    // Update session ID for real session
-    if (streamingSessionId == 0 && clientSessionId != 0) {
-        streamingSessionId = clientSessionId;
-        logMessage("Starting real session: " + std::to_string(clientSessionId));
-        
-        // Clear everything and start fresh for real session
-        fCapture->stopCapture();
-        fCapture->clearSpsPps();
-        
-        if (!fCapture->reset()) {
-            logMessage("Failed to reset device for real session");
-        }
-        
-        if (!fCapture->startCapture()) {
-            logMessage("Failed to start capture for real session");
-        }
+    // Force new SPS/PPS extraction for each session
+    fCapture->stopCapture();
+    fCapture->clearSpsPps();
+    fCapture->startCapture();
 
-        // Extract fresh SPS/PPS for real session
-        if (!fCapture->extractSpsPps()) {
-            logMessage("Failed to extract SPS/PPS for real session");
-        }
+    if (!fCapture->extractSpsPps()) {
+        logMessage("Failed to extract SPS/PPS for session " + std::to_string(clientSessionId));
+        return nullptr;
     }
     
-    if (streamingSessionId != 0 && clientSessionId != streamingSessionId) {
-        logMessage("Note: Different client session ID: " + std::to_string(clientSessionId));
-    }
-    
-    logMessage("Setting up stream for session: " + std::to_string(clientSessionId));
+    logMessage("Successfully extracted SPS/PPS for session " + std::to_string(clientSessionId));
 
-    // Create our custom source
+    // Create source with explicit SPS/PPS requirement
     v4l2H264FramedSource* source = v4l2H264FramedSource::createNew(envir(), fCapture);
     if (source == nullptr) {
-        logMessage("Failed to create v4l2H264FramedSource.");
+        logMessage("Failed to create source for session " + std::to_string(clientSessionId));
         return nullptr;
     }
     

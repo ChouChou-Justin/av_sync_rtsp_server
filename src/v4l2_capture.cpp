@@ -178,7 +178,7 @@ bool v4l2Capture::startCapture() {
         return false;
     }
 
-    logMessage("Successfully start capture.");
+    logMessage("Successfully start video capture.");
     return true;
 }
 
@@ -202,7 +202,7 @@ bool v4l2Capture::stopCapture() {
         ioctl(fd, VIDIOC_DQBUF, &buf);
     }
 
-    logMessage("Successfully stop capture.");
+    logMessage("Successfully stop video capture.");
     return true;
 }
 
@@ -240,16 +240,13 @@ bool v4l2Capture::reset() {
         logMessage("Failed to release buffers: " + std::string(strerror(errno)));
     }
     
-    // Wait for device to settle
-    // usleep(50000); // 50ms
-    
     // Reinitialize mmap
     if (!initializeMmap()) {
         logMessage("Failed to reinitialize mmap during reset.");
         return false;
     }
     
-    logMessage("Successfully reset capture.");
+    logMessage("Successfully reset video capture.");
     return true;
 }
 
@@ -378,20 +375,21 @@ void v4l2Capture::clearSpsPps() {
 }
 
 bool v4l2Capture::extractSpsPpsImmediate() {
-    const int MAX_IMMEDIATE_ATTEMPTS = 10;  
-    // const int WAIT_MICROSECONDS = 100000;   
+    // logMessage("Starting SPS/PPS extraction...");
+    const int MAX_IMMEDIATE_ATTEMPTS = 10; 
     
     // Force keyframe request
     struct v4l2_control control;
     control.id = V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME;
     if (ioctl(fd, VIDIOC_S_CTRL, &control) == -1) {
         logMessage("Failed to force keyframe: " + std::string(strerror(errno)));
+    } else {
+        logMessage("Successfully requested keyframe.");
     }
     
-    // Wait a bit for the keyframe to be generated
-    // usleep(WAIT_MICROSECONDS);
-    
     for (int i = 0; i < MAX_IMMEDIATE_ATTEMPTS; ++i) {
+        // logMessage("Extraction attempt " + std::to_string(i + 1));
+
         size_t frameSize;
         unsigned char* frame = getFrame(frameSize);
         
@@ -473,9 +471,6 @@ bool v4l2Capture::extractSpsPpsImmediate() {
             logMessage("Successfully extracted SPS and PPS on attempt " + std::to_string(i + 1));
             return true;
         }
-        
-        // Wait before next attempt
-        // usleep(WAIT_MICROSECONDS);
     }
     
     logMessage("Failed to extract SPS/PPS during immediate initialization");

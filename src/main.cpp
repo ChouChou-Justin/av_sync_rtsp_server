@@ -21,8 +21,6 @@ int main(int argc, char** argv) {
     TaskScheduler* scheduler = BasicTaskScheduler::createNew();
     UsageEnvironment* env = BasicUsageEnvironment::createNew(*scheduler);
 
-    logMessage("Starting Unified RTSP Server...");
-
     try {
         // Initialize video capture
         v4l2Capture* videoCapture = new v4l2Capture(VIDEO_DEVICE);
@@ -33,7 +31,7 @@ int main(int argc, char** argv) {
             delete scheduler;
             return -1;
         }
-        logMessage("Video capture initialized");
+        logMessage("Successfully initialize video capture.");
 
         // Initialize audio capture
         alsa_rtsp::alsaCapture* audioCapture = new alsa_rtsp::alsaCapture(
@@ -50,7 +48,7 @@ int main(int argc, char** argv) {
             delete scheduler;
             return -1;
         }
-        logMessage("Audio capture initialized");
+        logMessage("Successfully initialize audio capture.");
 
         // Start captures
         if (!videoCapture->startCapture()) {
@@ -70,7 +68,6 @@ int main(int argc, char** argv) {
             delete scheduler;
             return -1;
         }
-        logMessage("Both captures started successfully");
 
         // Create and initialize RTSP server
         UnifiedRTSPServerManager* serverManager = new UnifiedRTSPServerManager(
@@ -89,20 +86,20 @@ int main(int argc, char** argv) {
             return -1;
         }
 
-        logMessage("RTSP server initialized successfully");
-        logMessage("Use Ctrl-C to exit...");
+        logMessage("Successfully initialize RTSP server.");
+        logMessage("Use Ctrl-C to exit.");
 
         // Run the event loop
         serverManager->runEventLoop(&shouldExit);
 
         // Cleanup
-        logMessage("Cleaning up...");
         serverManager->cleanup();
         videoCapture->stopCapture();
         audioCapture->stopCapture();
         delete serverManager;
         delete videoCapture;
         delete audioCapture;
+        logMessage("Successfully clean up resources.");
 
     } catch (const std::exception& e) {
         logMessage("Exception occurred: " + std::string(e.what()));
@@ -112,6 +109,6 @@ int main(int argc, char** argv) {
     env->reclaim();
     delete scheduler;
 
-    logMessage("Server shutdown complete");
+    logMessage("Successfully shutdown server.");
     return 0;
 }

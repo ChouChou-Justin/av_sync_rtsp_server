@@ -41,7 +41,7 @@ bool UnifiedRTSPServerManager::initialize() {
             return false;
         }
         sms_->addSubsession(videoSubsession);
-        logMessage("Added video subsession");
+        logMessage("Successfully add video subsession.");
     }
 
     // Add audio subsession
@@ -53,7 +53,7 @@ bool UnifiedRTSPServerManager::initialize() {
             return false;
         }
         sms_->addSubsession(audioSubsession);
-        logMessage("Added audio subsession");
+        logMessage("Successfully add audio subsession.");
     }
 
     // Add session to server

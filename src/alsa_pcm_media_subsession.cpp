@@ -16,9 +16,7 @@ FramedSource* alsaPcmMediaSubsession::createNewStreamSource(unsigned clientSessi
     return alsaPcmFramedSource::createNew(envir(), fCapture);
 }
 
-RTPSink* alsaPcmMediaSubsession::createNewRTPSink(Groupsock* rtpGroupsock,
-                                               unsigned char rtpPayloadTypeIfDynamic,
-                                               FramedSource* inputSource) {
+RTPSink* alsaPcmMediaSubsession::createNewRTPSink(Groupsock* rtpGroupsock, unsigned char rtpPayloadTypeIfDynamic, FramedSource* inputSource) {
     logMessage("Creating new RTP sink with payload type: 97");
     return SimpleRTPSink::createNew(envir(), rtpGroupsock,
                                    97, // payload type

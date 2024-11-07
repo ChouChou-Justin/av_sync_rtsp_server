@@ -6,8 +6,7 @@
 
 namespace alsa_rtsp {
 
-alsaCapture::alsaCapture(const char* device, unsigned int sampleRate, 
-                        unsigned int channels, unsigned int bitDepth)
+alsaCapture::alsaCapture(const char* device, unsigned int sampleRate, unsigned int channels, unsigned int bitDepth)
     // Member initializer list - initializes class members before constructor body
     : pcm_device(device)                          // Initialize ALSA device name
     , sample_rate(sampleRate)                     // Initialize sampling rate
@@ -115,7 +114,7 @@ bool alsaCapture::initialize() {
         return false;
     }
 
-    logMessage("Successfully set hardware parameters.");
+    // logMessage("Successfully set hardware parameters.");
 
     // Configure software parameters for better buffer management and additional protection against underruns
     snd_pcm_sw_params_t *swparams;
@@ -142,19 +141,19 @@ bool alsaCapture::initialize() {
     snd_pcm_hw_params_get_rate(params, &actual_rate, &dir);
     snd_pcm_hw_params_get_period_time(params, &period_time, &dir);
 
-    std::cout << "========= ALSA Configuration =========\n"
-                << "Access: " << snd_pcm_access_name(SND_PCM_ACCESS_RW_INTERLEAVED) << "\n"
-                << "Format: " << snd_pcm_format_name(actualFormat) << "\n"
-                << "Sample Rate: " << actual_rate << " Hz\n"
-                << "Channels: " << num_channels << "\n"
-                << "Bit Depth: " << bit_depth << " bits\n"
-                << "======================================\n"
-                << "Buffer Size: " << actual_buffer_size * num_channels * (bit_depth/8) << " bytes"
-                << " (" << actual_buffer_size << " frames)\n"
-                << "Number of Periods in Buffer: " << (actual_buffer_size / actual_period_size) << " periods\n"
-                << "Number of Frames per Period: " << actual_period_size << " frames\n"                    
-                << "Bytes per Frame: " << num_channels * (bit_depth/8) << " bytes\n"
-                << "======================================\n";
+    // std::cout << "========= ALSA Configuration =========\n"
+    //             << "Access: " << snd_pcm_access_name(SND_PCM_ACCESS_RW_INTERLEAVED) << "\n"
+    //             << "Format: " << snd_pcm_format_name(actualFormat) << "\n"
+    //             << "Sample Rate: " << actual_rate << " Hz\n"
+    //             << "Channels: " << num_channels << "\n"
+    //             << "Bit Depth: " << bit_depth << " bits\n"
+    //             << "======================================\n"
+    //             << "Buffer Size: " << actual_buffer_size * num_channels * (bit_depth/8) << " bytes"
+    //             << " (" << actual_buffer_size << " frames)\n"
+    //             << "Number of Periods in Buffer: " << (actual_buffer_size / actual_period_size) << " periods\n"
+    //             << "Number of Frames per Period: " << actual_period_size << " frames\n"                    
+    //             << "Bytes per Frame: " << num_channels * (bit_depth/8) << " bytes\n"
+    //             << "======================================\n";
     return true;
 }
 
@@ -194,13 +193,13 @@ bool alsaCapture::startCapture() {
         snd_mixer_close(mixer);
     }
 
-    logMessage("Successfully start capture.");
+    logMessage("Successfully start audio capture.");
     return true;
 }
 
 bool alsaCapture::stopCapture() {
     snd_pcm_drain(pcm_handle);
-    logMessage("Successfully stop capture.");
+    logMessage("Successfully stop audio capture.");
     return true;
 }
 
@@ -252,7 +251,7 @@ bool alsaCapture::reset() {
         return false;
     }
 
-    logMessage("Successfully reset capture.");
+    logMessage("Successfully reset audio capture.");
     return true;
 }
 
