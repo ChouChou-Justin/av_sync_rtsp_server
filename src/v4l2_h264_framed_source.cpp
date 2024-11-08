@@ -7,7 +7,7 @@ v4l2H264FramedSource* v4l2H264FramedSource::createNew(UsageEnvironment& env, v4l
 
 v4l2H264FramedSource::v4l2H264FramedSource(UsageEnvironment& env, v4l2Capture* capture)
     : FramedSource(env), fCapture(capture), 
-      gopState(WAITING_FOR_GOP), fCurTimestamp(90000)  {
+      gopState(WAITING_FOR_GOP), fCurTimestamp(0)  {
 
     // Store SPS/PPS for reuse
     if (capture->hasSpsPps()) {
@@ -29,6 +29,39 @@ v4l2H264FramedSource::~v4l2H264FramedSource() {
 }
 
 void v4l2H264FramedSource::doGetNextFrame() {
+    if (!isCurrentlyAwaitingData()) return;
+
+    // Always send SPS/PPS at the start of a new GOP
+    if (needSpsPps) {
+        if (gopState == SENDING_SPS && storedSps != nullptr) {
+            memcpy(fTo, storedSps, storedSpsSize);
+            fFrameSize = storedSpsSize;
+            gopState = SENDING_PPS;
+            needSpsPps = true;  // Still need to send PPS
+            
+            // Use current time for first packet
+            gettimeofday(&fPresentationTime, NULL);
+            fDurationInMicroseconds = 0;
+            
+            FramedSource::afterGetting(this);
+            return;
+        }
+        
+        if (gopState == SENDING_PPS && storedPps != nullptr) {
+            memcpy(fTo, storedPps, storedPpsSize);
+            fFrameSize = storedPpsSize;
+            gopState = SENDING_IDR;
+            needSpsPps = false;  // Done with SPS/PPS
+            
+            // Use same time as SPS
+            fPresentationTime = fInitialTime;
+            fDurationInMicroseconds = 0;
+            
+            FramedSource::afterGetting(this);
+            return;
+        }
+    }
+    
     if (!foundFirstGOP) {
         // Wait for first complete GOP
         if (gopState == WAITING_FOR_GOP) {

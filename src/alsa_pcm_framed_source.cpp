@@ -8,7 +8,7 @@ alsaPcmFramedSource* alsaPcmFramedSource::createNew(UsageEnvironment& env, alsaC
 }
 
 alsaPcmFramedSource::alsaPcmFramedSource(UsageEnvironment& env, alsaCapture* capture)
-    : FramedSource(env), fCapture(capture), fCurTimestamp(16000) {  // Start at 1 second
+    : FramedSource(env), fCapture(capture), fCurTimestamp(0) {  // Start at 1 second
     fFrameSize = fCapture->getBufferSize();
     if (fFrameSize > (1024 * 1024 * 10)) { // 10MB limit
         handleClosure();

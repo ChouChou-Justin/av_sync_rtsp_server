@@ -53,10 +53,6 @@ char const* alsaPcmMediaSubsession::getAuxSDPLine(RTPSink* rtpSink, FramedSource
     unsigned int sampleRate = fCapture->getSampleRate();
     unsigned int channels = fCapture->getChannels();
     
-    // Debug output
-    envir() << "Creating SDP line with sample rate: " << sampleRate 
-            << " Hz, channels: " << channels << "\n";
-    
     // Format the SDP line with proper parameter order
     snprintf(fmtpLine, fmtpLineSize, fmtpFmt,
             sampleRate,    // Sample rate first
