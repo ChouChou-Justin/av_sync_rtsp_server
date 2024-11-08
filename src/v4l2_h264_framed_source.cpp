@@ -9,17 +9,20 @@ v4l2H264FramedSource::v4l2H264FramedSource(UsageEnvironment& env, v4l2Capture* c
     : FramedSource(env), fCapture(capture), 
       gopState(WAITING_FOR_GOP), fCurTimestamp(0)  {
 
-    // Store SPS/PPS for reuse
-    if (capture->hasSpsPps()) {
-        storedSpsSize = capture->getSPSSize();
-        storedPpsSize = capture->getPPSSize();
-        
-        storedSps = new uint8_t[storedSpsSize];
-        storedPps = new uint8_t[storedPpsSize];
-        
-        memcpy(storedSps, capture->getSPS(), storedSpsSize);
-        memcpy(storedPps, capture->getPPS(), storedPpsSize);
+    // Block delivery until SPS/PPS is ready
+    if (!capture->hasSpsPps()) {
+        logMessage("Waiting for SPS/PPS before starting frame delivery");
+        return;
     }
+
+    storedSpsSize = capture->getSPSSize();
+    storedPpsSize = capture->getPPSSize();
+    
+    storedSps = new uint8_t[storedSpsSize];
+    storedPps = new uint8_t[storedPpsSize];
+    
+    memcpy(storedSps, capture->getSPS(), storedSpsSize);
+    memcpy(storedPps, capture->getPPS(), storedPpsSize);
 }
 
 v4l2H264FramedSource::~v4l2H264FramedSource() {
@@ -31,53 +34,34 @@ v4l2H264FramedSource::~v4l2H264FramedSource() {
 void v4l2H264FramedSource::doGetNextFrame() {
     if (!isCurrentlyAwaitingData()) return;
 
-    if (!foundFirstGOP) {
-        // Wait for first complete GOP
-        if (gopState == WAITING_FOR_GOP) {
-            // Try to get an IDR frame
-            size_t length;
-            unsigned char* frame = fCapture->getFrameWithoutStartCode(length);
-            
-            // Add validation for frame data
-            if (frame && length > 0) {
-                // Check for valid frame data (not all zeros)
-                bool hasValidData = false;
-                for (size_t i = 0; i < length && !hasValidData; i++) {
-                    if (frame[i] != 0) hasValidData = true;
-                }
+    // IMPORTANT: Block any frame delivery until we have a valid GOP sequence
+    if (!foundFirstGOP && gopState == WAITING_FOR_GOP) {
+        // Try to get an IDR frame
+        size_t length;
+        unsigned char* frame = fCapture->getFrameWithoutStartCode(length);
+        
+        if (frame) {
+            if (length > 0 && (frame[0] & 0x1F) == 5) {  // IDR frame
+                firstIDRFrame = new unsigned char[length];
+                firstIDRSize = length;
+                memcpy(firstIDRFrame, frame, length);
+                fCapture->releaseFrame();
                 
-                if (!hasValidData) {
-                    // Skip empty frames
-                    fCapture->releaseFrame();
-                    envir().taskScheduler().scheduleDelayedTask(0,
-                        (TaskFunc*)FramedSource::afterGetting, this);
-                    return;
-                }
-
-                if ((frame[0] & 0x1F) == 5) {  // IDR frame
-                    // Found IDR, store it
-                    delete[] firstIDRFrame;  // Prevent memory leak
-                    firstIDRFrame = new unsigned char[length];
-                    firstIDRSize = length;
-                    memcpy(firstIDRFrame, frame, length);
-                    fCapture->releaseFrame();
-                    
-                    if (storedSps && storedPps) {
-                        foundFirstGOP = true;
-                        gettimeofday(&fInitialTime, NULL);
-                        gopState = SENDING_SPS;
-                        doGetNextFrame();
-                    }
+                if (storedSps && storedPps) {
+                    foundFirstGOP = true;
+                    gettimeofday(&fInitialTime, NULL);
+                    gopState = SENDING_SPS;
+                    doGetNextFrame();  // Start sending proper sequence
                     return;
                 }
             }
-            
-            if (frame) fCapture->releaseFrame();
-            // Keep trying until we get a complete GOP
-            envir().taskScheduler().scheduleDelayedTask(0,
-                (TaskFunc*)FramedSource::afterGetting, this);
-            return;
+            fCapture->releaseFrame();
         }
+        
+        // IMPORTANT: Don't deliver any frames, just reschedule
+        envir().taskScheduler().scheduleDelayedTask(1000,  // 1ms delay
+            (TaskFunc*)FramedSource::afterGetting, this);
+        return;
     }
     
     if (gopState == SENDING_SPS) {
