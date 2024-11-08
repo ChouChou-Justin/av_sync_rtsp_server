@@ -31,37 +31,6 @@ v4l2H264FramedSource::~v4l2H264FramedSource() {
 void v4l2H264FramedSource::doGetNextFrame() {
     if (!isCurrentlyAwaitingData()) return;
 
-    // Always send SPS/PPS at the start of a new GOP
-    if (needSpsPps) {
-        if (gopState == SENDING_SPS && storedSps != nullptr) {
-            memcpy(fTo, storedSps, storedSpsSize);
-            fFrameSize = storedSpsSize;
-            gopState = SENDING_PPS;
-            needSpsPps = true;  // Still need to send PPS
-            
-            // Use current time for first packet
-            gettimeofday(&fPresentationTime, NULL);
-            fDurationInMicroseconds = 0;
-            
-            FramedSource::afterGetting(this);
-            return;
-        }
-        
-        if (gopState == SENDING_PPS && storedPps != nullptr) {
-            memcpy(fTo, storedPps, storedPpsSize);
-            fFrameSize = storedPpsSize;
-            gopState = SENDING_IDR;
-            needSpsPps = false;  // Done with SPS/PPS
-            
-            // Use same time as SPS
-            fPresentationTime = fInitialTime;
-            fDurationInMicroseconds = 0;
-            
-            FramedSource::afterGetting(this);
-            return;
-        }
-    }
-    
     if (!foundFirstGOP) {
         // Wait for first complete GOP
         if (gopState == WAITING_FOR_GOP) {
@@ -69,22 +38,38 @@ void v4l2H264FramedSource::doGetNextFrame() {
             size_t length;
             unsigned char* frame = fCapture->getFrameWithoutStartCode(length);
             
-            if (frame && length > 0 && (frame[0] & 0x1F) == 5) {
-                // Found IDR, store it
-                firstIDRFrame = new unsigned char[length];
-                firstIDRSize = length;
-                memcpy(firstIDRFrame, frame, length);
-                fCapture->releaseFrame();
-                
-                if (storedSps && storedPps) {
-                    // We have all components
-                    foundFirstGOP = true;
-                    // Get initial time once
-                    gettimeofday(&fInitialTime, NULL);
-                    gopState = SENDING_SPS;
-                    doGetNextFrame();  // Recursive call to start sending
+            // Add validation for frame data
+            if (frame && length > 0) {
+                // Check for valid frame data (not all zeros)
+                bool hasValidData = false;
+                for (size_t i = 0; i < length && !hasValidData; i++) {
+                    if (frame[i] != 0) hasValidData = true;
                 }
-                return;
+                
+                if (!hasValidData) {
+                    // Skip empty frames
+                    fCapture->releaseFrame();
+                    envir().taskScheduler().scheduleDelayedTask(0,
+                        (TaskFunc*)FramedSource::afterGetting, this);
+                    return;
+                }
+
+                if ((frame[0] & 0x1F) == 5) {  // IDR frame
+                    // Found IDR, store it
+                    delete[] firstIDRFrame;  // Prevent memory leak
+                    firstIDRFrame = new unsigned char[length];
+                    firstIDRSize = length;
+                    memcpy(firstIDRFrame, frame, length);
+                    fCapture->releaseFrame();
+                    
+                    if (storedSps && storedPps) {
+                        foundFirstGOP = true;
+                        gettimeofday(&fInitialTime, NULL);
+                        gopState = SENDING_SPS;
+                        doGetNextFrame();
+                    }
+                    return;
+                }
             }
             
             if (frame) fCapture->releaseFrame();
