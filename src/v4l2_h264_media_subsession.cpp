@@ -26,24 +26,80 @@ FramedSource* v4l2H264MediaSubsession::createNewStreamSource(unsigned clientSess
     fCapture->clearSpsPps();
     fCapture->startCapture();
 
-    if (!fCapture->extractSpsPps()) {
-        logMessage("Failed to extract SPS/PPS for session " + std::to_string(clientSessionId));
+    if (!fCapture->extractSpsPpsImmediate()) {
+        logMessage("Immediate SPS/PPS/IDR extraction failed for session " + std::to_string(clientSessionId));
         return nullptr;
     }
-    
-    logMessage("Successfully extracted SPS/PPS for session " + std::to_string(clientSessionId));
 
-    // Create source with explicit SPS/PPS requirement
-    v4l2H264FramedSource* source = v4l2H264FramedSource::createNew(envir(), fCapture);
-    if (source == nullptr) {
-        logMessage("Failed to create source for session " + std::to_string(clientSessionId));
-        return nullptr;
+    // Prepare initial frame data with timestamps
+    InitialFrameData* initData = new InitialFrameData();
+
+    // Get initial timestamp before copying any frames
+    gettimeofday(&initData->initialTime, NULL);
+
+    // Copy SPS/PPS
+    initData->spsSize = fCapture->getSPSSize();
+    initData->ppsSize = fCapture->getPPSSize();
+    initData->sps = new uint8_t[initData->spsSize];
+    initData->pps = new uint8_t[initData->ppsSize];
+    memcpy(initData->sps, fCapture->getSPS(), initData->spsSize);
+    memcpy(initData->pps, fCapture->getPPS(), initData->ppsSize);
+    
+    // Add retry logic for IDR frame acquisition
+    const int MAX_IDR_ATTEMPTS = 10;
+    const int IDR_RETRY_DELAY_US = 100000; // 100ms delay between attempts
+
+    for (int attempt = 0; attempt < MAX_IDR_ATTEMPTS; attempt++) {
+        // Request a keyframe
+        struct v4l2_control control;
+        control.id = V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME;
+        if (ioctl(fCapture->getFd(), VIDIOC_S_CTRL, &control) != -1) {
+            logMessage("Requested keyframe for IDR attempt " + std::to_string(attempt + 1));
+        }
+
+        // Wait for the camera to process the keyframe request
+        usleep(IDR_RETRY_DELAY_US);
+
+        // Try to get multiple frames to find an IDR
+        const int FRAMES_TO_CHECK = 5;
+        for (int frame_check = 0; frame_check < FRAMES_TO_CHECK; frame_check++) {
+            size_t frameSize;
+            unsigned char* frame = fCapture->getFrameWithoutStartCode(frameSize);
+            
+            if (frame && frameSize > 0) {
+                if ((frame[0] & 0x1F) == 5) {  // Found IDR frame
+                    initData->idr = new uint8_t[frameSize];
+                    initData->idrSize = frameSize;
+                    memcpy(initData->idr, frame, frameSize);
+                    fCapture->releaseFrame();
+                    
+                    logMessage("Successfully acquired IDR frame on attempt " + std::to_string(attempt + 1) + ", frame check " + std::to_string(frame_check + 1));
+                    
+                    // Create source with initial data
+                    v4l2H264FramedSource* source = v4l2H264FramedSource::createNew(
+                        envir(), fCapture, initData);
+                    
+                    if (source == nullptr) {
+                        delete initData;
+                        logMessage("Failed to create source for session " + std::to_string(clientSessionId));
+                        return nullptr;
+                    }
+                    
+                    return H264VideoStreamDiscreteFramer::createNew(envir(), source);
+                }
+                fCapture->releaseFrame();
+            }
+            usleep(10000);  // 10ms delay between frame checks
+        }
+        
+        logMessage("IDR frame not found in attempt " + std::to_string(attempt + 1) + ", retrying...");
     }
-    
-    // Set the flag before wrapping with H264VideoStreamDiscreteFramer
-    source->setNeedSpsPps();
-    
-    return H264VideoStreamDiscreteFramer::createNew(envir(), source);
+
+    // If we get here, we failed to get an IDR frame
+    logMessage("Failed to get IDR frame after " + std::to_string(MAX_IDR_ATTEMPTS) + 
+              " attempts for session " + std::to_string(clientSessionId));
+    delete initData;
+    return nullptr;
 }
 
 RTPSink* v4l2H264MediaSubsession::createNewRTPSink(Groupsock* rtpGroupsock, unsigned char rtpPayloadTypeIfDynamic, FramedSource* inputSource) {

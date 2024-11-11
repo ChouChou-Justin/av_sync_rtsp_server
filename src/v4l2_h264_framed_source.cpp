@@ -1,218 +1,147 @@
 #include "v4l2_h264_framed_source.h"
 #include "logger.h"
 
-v4l2H264FramedSource* v4l2H264FramedSource::createNew(UsageEnvironment& env, v4l2Capture* capture) {
-    return new v4l2H264FramedSource(env, capture);
+v4l2H264FramedSource* v4l2H264FramedSource::createNew(UsageEnvironment& env, v4l2Capture* capture, InitialFrameData* initData) {
+    return new v4l2H264FramedSource(env, capture, initData);
 }
 
-v4l2H264FramedSource::v4l2H264FramedSource(UsageEnvironment& env, v4l2Capture* capture)
+v4l2H264FramedSource::v4l2H264FramedSource(UsageEnvironment& env, v4l2Capture* capture, InitialFrameData* initData)
     : FramedSource(env), 
       fCapture(capture), 
-      gopState(WAITING_FOR_GOP), 
+      fInitData(initData),
       fCurTimestamp(0),
-      firstIDRFrame(nullptr), 
-      firstIDRSize(0),
-      storedSps(nullptr), 
-      storedPps(nullptr),
-      storedSpsSize(0), 
-      storedPpsSize(0),
-      foundFirstGOP(false) {
+      gopState(SENDING_SPS){ // Start in SENDING_SPS state immediately
 
-    // Block delivery until SPS/PPS is ready
-    if (!capture->hasSpsPps()) {
-        logMessage("Waiting for SPS/PPS before starting frame delivery");
-        return;
-    }
-
-    storedSpsSize = capture->getSPSSize();
-    storedPpsSize = capture->getPPSSize();
-    
-    storedSps = new uint8_t[storedSpsSize];
-    storedPps = new uint8_t[storedPpsSize];
-    
-    memcpy(storedSps, capture->getSPS(), storedSpsSize);
-    memcpy(storedPps, capture->getPPS(), storedPpsSize);
+    // Initialize with the provided data
+    fInitialTime = initData->initialTime;
 }
 
 v4l2H264FramedSource::~v4l2H264FramedSource() {
-    delete[] storedSps;
-    delete[] storedPps;
+    delete fInitData;  // Clean up initial frame data
     logMessage("Successfully destroyed v4l2H264FramedSource.");
 }
 
 void v4l2H264FramedSource::doGetNextFrame() {
     if (!isCurrentlyAwaitingData()) return;
 
-    // IMPORTANT: Block any frame delivery until we have a valid GOP sequence
-    if (!foundFirstGOP && gopState == WAITING_FOR_GOP) {
-        // Try to get an IDR frame
-        size_t length;
-        unsigned char* frame = fCapture->getFrameWithoutStartCode(length);
-        
-        if (frame) {
-            if (length > 0 && (frame[0] & 0x1F) == 5) {  // IDR frame
-                firstIDRFrame = new unsigned char[length];
-                firstIDRSize = length;
-                memcpy(firstIDRFrame, frame, length);
-                fCapture->releaseFrame();
-                
-                if (storedSps && storedPps) {
-                    foundFirstGOP = true;
-                    gettimeofday(&fInitialTime, NULL);
-                    gopState = SENDING_SPS;
-                    doGetNextFrame();  // Start sending proper sequence
-                    return;
+    switch (gopState) {
+        case SENDING_SPS: {
+            if (fInitData->sps && fInitData->spsSize <= fMaxSize) {
+                memcpy(fTo, fInitData->sps, fInitData->spsSize);
+                fFrameSize = fInitData->spsSize;
+                // Use GOP starting timestamp for SPS
+                unsigned long long elapsedMicros = (fCurTimestamp / 90) * 1000;
+                fPresentationTime = fInitialTime;
+                fPresentationTime.tv_sec += elapsedMicros / 1000000;
+                fPresentationTime.tv_usec += elapsedMicros % 1000000;
+                if (fPresentationTime.tv_usec >= 1000000) {
+                    fPresentationTime.tv_sec += fPresentationTime.tv_usec / 1000000;
+                    fPresentationTime.tv_usec %= 1000000;
                 }
+                fDurationInMicroseconds = 0;
+                gopState = SENDING_PPS;
+                FramedSource::afterGetting(this);
             }
-            fCapture->releaseFrame();
+            break;
         }
         
-        // IMPORTANT: Don't deliver any frames, just reschedule
-        envir().taskScheduler().scheduleDelayedTask(1000,  // 1ms delay
-            (TaskFunc*)FramedSource::afterGetting, this);
-        return;
-    }
-    
-    if (gopState == SENDING_SPS) {
-        // Send SPS
-        if (storedSps && storedSpsSize <= fMaxSize) {
-            memcpy(fTo, storedSps, storedSpsSize);
-            fFrameSize = storedSpsSize;
-            gopState = SENDING_PPS;
-
-            // Calculate presentation time from initial time
-            unsigned long long elapsedMicros = (fCurTimestamp / 90) * 1000;
-            fPresentationTime = fInitialTime;
-            fPresentationTime.tv_sec += elapsedMicros / 1000000;
-            fPresentationTime.tv_usec += elapsedMicros % 1000000;
-            if (fPresentationTime.tv_usec >= 1000000) {
-                fPresentationTime.tv_sec += fPresentationTime.tv_usec / 1000000;
-                fPresentationTime.tv_usec %= 1000000;
+        case SENDING_PPS: {
+            if (fInitData->pps && fInitData->ppsSize <= fMaxSize) {
+                memcpy(fTo, fInitData->pps, fInitData->ppsSize);
+                fFrameSize = fInitData->ppsSize;
+                // Use same timestamp as SPS
+                fPresentationTime = fInitialTime;
+                unsigned long long elapsedMicros = (fCurTimestamp / 90) * 1000;
+                fPresentationTime.tv_sec += elapsedMicros / 1000000;
+                fPresentationTime.tv_usec += elapsedMicros % 1000000;
+                if (fPresentationTime.tv_usec >= 1000000) {
+                    fPresentationTime.tv_sec += fPresentationTime.tv_usec / 1000000;
+                    fPresentationTime.tv_usec %= 1000000;
+                }
+                fDurationInMicroseconds = 0;
+                gopState = SENDING_IDR;
+                FramedSource::afterGetting(this);
             }
-            fDurationInMicroseconds = 0;
-            
-            // Don't increment timestamp for SPS
-            
-            FramedSource::afterGetting(this);
-            return;
+            break;
         }
-    }
-    
-    if (gopState == SENDING_PPS) {
-        // Send PPS
-        if (storedPps && storedPpsSize <= fMaxSize) {
-            memcpy(fTo, storedPps, storedPpsSize);
-            fFrameSize = storedPpsSize;
-            gopState = SENDING_IDR;
 
-            // Use same presentation time and timestamp as SPS
-            fPresentationTime = fInitialTime;
-            unsigned long long elapsedMicros = (fCurTimestamp / 90) * 1000;
-            fPresentationTime.tv_sec += elapsedMicros / 1000000;
-            fPresentationTime.tv_usec += elapsedMicros % 1000000;
-            if (fPresentationTime.tv_usec >= 1000000) {
-                fPresentationTime.tv_sec += fPresentationTime.tv_usec / 1000000;
-                fPresentationTime.tv_usec %= 1000000;
+        case SENDING_IDR: {
+            if (fInitData->idr && fInitData->idrSize <= fMaxSize) {
+                memcpy(fTo, fInitData->idr, fInitData->idrSize);
+                fFrameSize = fInitData->idrSize;
+                // Use same timestamp as SPS/PPS
+                fPresentationTime = fInitialTime;
+                unsigned long long elapsedMicros = (fCurTimestamp / 90) * 1000;
+                fPresentationTime.tv_sec += elapsedMicros / 1000000;
+                fPresentationTime.tv_usec += elapsedMicros % 1000000;
+                if (fPresentationTime.tv_usec >= 1000000) {
+                    fPresentationTime.tv_sec += fPresentationTime.tv_usec / 1000000;
+                    fPresentationTime.tv_usec %= 1000000;
+                }
+                fDurationInMicroseconds = 33333;  // First frame duration
+                gopState = SENDING_FRAMES;
+                fCurTimestamp += TIMESTAMP_INCREMENT;  // Start incrementing from next frame
+                delete[] fInitData->idr;  // Clear the stored IDR as we'll get new ones
+                fInitData->idr = nullptr;
+                fInitData->idrSize = 0;
+                FramedSource::afterGetting(this);
             }
-            fDurationInMicroseconds = 0;
-            
-            // Don't increment timestamp for PPS
-            
-            FramedSource::afterGetting(this);
-            return;
+            break;
         }
-    }
-
-    static unsigned char* pendingIDR = nullptr;
-    static size_t pendingIDRLength = 0;
-    
-    if (gopState == SENDING_IDR) {
-        // Send stored IDR for first GOP or waiting IDR
-        unsigned char* idrToSend = firstIDRFrame ? firstIDRFrame : pendingIDR;
-        size_t idrSize = firstIDRFrame ? firstIDRSize : pendingIDRLength;
         
-        if (idrToSend && idrSize <= fMaxSize) {
-            memcpy(fTo, idrToSend, idrSize);
-            fFrameSize = idrSize;
+        case SENDING_FRAMES: {
+            // Regular frame delivery
+            size_t length;
+            unsigned char* frame = fCapture->getFrameWithoutStartCode(length);
+            
+            if (frame == nullptr || !fCapture->isFrameValid()) {
+                handleClosure();
+                return;
+            }
 
-            // Use same presentation time as SPS/PPS
-            fPresentationTime = fInitialTime;
+            // Check for new IDR frame
+            if (length > 0 && (frame[0] & 0x1F) == 5) {
+                // Store new IDR frame and prepare for new GOP sequence
+                fInitData->idr = new uint8_t[length];
+                fInitData->idrSize = length;
+                memcpy(fInitData->idr, frame, length);
+                fCapture->releaseFrame();
+
+                // Start new GOP sequence
+                gopState = SENDING_SPS;
+                // Don't increment timestamp here as we want same timestamp for SPS/PPS/IDR
+                doGetNextFrame();
+                return;
+            }
+            
+            if (length <= fMaxSize) {
+                memcpy(fTo, frame, length);
+                fFrameSize = length;
+                fNumTruncatedBytes = 0;
+            } else {
+                memcpy(fTo, frame, fMaxSize);
+                fFrameSize = fMaxSize;
+                fNumTruncatedBytes = length - fMaxSize;
+            }
+
+            // Calculate presentation time for regular frames
             unsigned long long elapsedMicros = (fCurTimestamp / 90) * 1000;
+            fPresentationTime = fInitialTime;
             fPresentationTime.tv_sec += elapsedMicros / 1000000;
             fPresentationTime.tv_usec += elapsedMicros % 1000000;
             if (fPresentationTime.tv_usec >= 1000000) {
                 fPresentationTime.tv_sec += fPresentationTime.tv_usec / 1000000;
                 fPresentationTime.tv_usec %= 1000000;
             }
-            fDurationInMicroseconds = 33333;
-
-            // Start incrementing timestamp from here
+            
+            fDurationInMicroseconds = 33333;  // 30fps
             fCurTimestamp += TIMESTAMP_INCREMENT;
-            
-            if (firstIDRFrame) {
-                delete[] firstIDRFrame;
-                firstIDRFrame = nullptr;
-                firstIDRSize = 0;
-            }
-            if (pendingIDR) {
-                delete[] pendingIDR;
-                pendingIDR = nullptr;
-                pendingIDRLength = 0;
-            }
-            
-            gopState = SENDING_FRAMES;
+
+            fCapture->releaseFrame();
             FramedSource::afterGetting(this);
-            return;
+            break;
         }
     }
-
-    // Handle regular frames
-    size_t length;
-    unsigned char* frame = fCapture->getFrameWithoutStartCode(length);
-    
-    if (frame == nullptr || !fCapture->isFrameValid()) {
-        handleClosure();
-        return;
-    }
-    
-    // Check for new GOP
-    if (length > 0 && (frame[0] & 0x1F) == 5) {
-        // Store IDR and prepare new GOP
-        pendingIDR = new unsigned char[length];
-        pendingIDRLength = length;
-        memcpy(pendingIDR, frame, length);
-        fCapture->releaseFrame();
-        
-        gopState = SENDING_SPS;
-        // Don't increment timestamp here, keep current
-        doGetNextFrame();
-        return;
-    }
-    
-    // Send regular frame
-    if (length <= fMaxSize) {
-        memcpy(fTo, frame, length);
-        fFrameSize = length;
-        fNumTruncatedBytes = 0;
-    } else {
-        memcpy(fTo, frame, fMaxSize);
-        fFrameSize = fMaxSize;
-        fNumTruncatedBytes = length - fMaxSize;
-    }
-
-    // Calculate presentation time mathematically
-    unsigned long long elapsedMicros = (fCurTimestamp / 90) * 1000;  // Convert from 90kHz to microseconds
-    fPresentationTime = fInitialTime;
-    fPresentationTime.tv_sec += elapsedMicros / 1000000;
-    fPresentationTime.tv_usec += elapsedMicros % 1000000;
-    if (fPresentationTime.tv_usec >= 1000000) {
-        fPresentationTime.tv_sec += fPresentationTime.tv_usec / 1000000;
-        fPresentationTime.tv_usec %= 1000000;
-    }
-    
-    fDurationInMicroseconds = 33333;  // 30fps, 33.33ms
-    fCurTimestamp += TIMESTAMP_INCREMENT;  // Simple increment by 3000
-
-    fCapture->releaseFrame();
-    FramedSource::afterGetting(this);
 }
+
+
