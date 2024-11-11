@@ -6,8 +6,17 @@ v4l2H264FramedSource* v4l2H264FramedSource::createNew(UsageEnvironment& env, v4l
 }
 
 v4l2H264FramedSource::v4l2H264FramedSource(UsageEnvironment& env, v4l2Capture* capture)
-    : FramedSource(env), fCapture(capture), 
-      gopState(WAITING_FOR_GOP), fCurTimestamp(0)  {
+    : FramedSource(env), 
+      fCapture(capture), 
+      gopState(WAITING_FOR_GOP), 
+      fCurTimestamp(0),
+      firstIDRFrame(nullptr), 
+      firstIDRSize(0),
+      storedSps(nullptr), 
+      storedPps(nullptr),
+      storedSpsSize(0), 
+      storedPpsSize(0),
+      foundFirstGOP(false) {
 
     // Block delivery until SPS/PPS is ready
     if (!capture->hasSpsPps()) {

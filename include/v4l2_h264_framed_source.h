@@ -42,6 +42,11 @@ private:
     unsigned storedSpsSize{0};
     unsigned storedPpsSize{0};
 
+    bool isReadyForDelivery() const {
+        return foundFirstGOP && storedSps && storedPps && 
+               firstIDRFrame != nullptr;
+    }
+
 };
 
 #endif // V4L2_H264_FRAMED_SOURCE_H
