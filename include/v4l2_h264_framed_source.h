@@ -48,6 +48,8 @@ private:
     };
     GopState gopState{SENDING_SPS};
 
+    bool fFirstGOP{true}; 
+
 };
 
 #endif // V4L2_H264_FRAMED_SOURCE_H
