@@ -27,9 +27,9 @@ bool UnifiedRTSPServerManager::initialize() {
 
     // Create a single session for both streams
     sms_ = ServerMediaSession::createNew(*env_,
-        "unified_stream",  // stream name
-        "Unified Audio/Video Stream",  // description
-        "Session streamed by Unified RTSP Server",
+        "avs_stream",  // stream name
+        "Audio/Video Synchronization Stream",  // description
+        "Audio/Video Synchronization with H.264 and PCM, streamed by the LIVE555 Media Server",
         True);  // reuse first source
 
     // Add video subsession
