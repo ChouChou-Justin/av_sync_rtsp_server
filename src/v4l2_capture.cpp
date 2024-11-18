@@ -207,46 +207,92 @@ bool v4l2Capture::stopCapture() {
 }
 
 bool v4l2Capture::reset() {    
-    // Ensure streaming is off
+    logMessage("Attempting comprehensive device reset...");
+
+    // 1. Stop streaming with proper error handling
     enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    ioctl(fd, VIDIOC_STREAMOFF, &type);  // Ignore error
+    if (ioctl(fd, VIDIOC_STREAMOFF, &type) == -1) {
+        logMessage("VIDIOC_STREAMOFF during reset: " + std::string(strerror(errno)));
+        // Continue anyway as we'll try to recover
+    }
     
-    // Clear all buffers
+    // 2. Clear all buffers with proper error tracking
+    bool dequeueFailed = false;
     for (unsigned int i = 0; i < n_buffers; ++i) {
         struct v4l2_buffer buf = {0};
         buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         buf.memory = V4L2_MEMORY_MMAP;
         buf.index = i;
-        ioctl(fd, VIDIOC_DQBUF, &buf);  // Ignore errors
-    }
-    
-    // Unmap all buffers
-    for (unsigned int i = 0; i < n_buffers; ++i) {
-        if (buffers[i].start != MAP_FAILED && buffers[i].start != nullptr) {
-            if (munmap(buffers[i].start, buffers[i].length) == -1) {
-                logMessage("munmap error during reset: " + std::string(strerror(errno)));
-            }
-            buffers[i].start = nullptr;
-            buffers[i].length = 0;
+        if (ioctl(fd, VIDIOC_DQBUF, &buf) == -1) {
+            dequeueFailed = true;
         }
     }
     
-    // Request buffers with count 0 to free all buffers
+    // 3. Unmap buffers with validation
+    if (buffers) {
+        for (unsigned int i = 0; i < n_buffers; ++i) {
+            if (buffers[i].start != MAP_FAILED && buffers[i].start != nullptr) {
+                if (munmap(buffers[i].start, buffers[i].length) == -1) {
+                    logMessage("munmap error during reset: " + std::string(strerror(errno)));
+                }
+                buffers[i].start = nullptr;
+                buffers[i].length = 0;
+            }
+        }
+        delete[] buffers;
+        buffers = nullptr;
+    }
+    
+    // 4. Reset buffer management
     struct v4l2_requestbuffers req = {0};
-    req.count = 0;
+    req.count = 0; // Request zero buffers to free all
     req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     req.memory = V4L2_MEMORY_MMAP;
     if (ioctl(fd, VIDIOC_REQBUFS, &req) == -1) {
         logMessage("Failed to release buffers: " + std::string(strerror(errno)));
     }
+
+    // 5. Re-initialize device parameters
+    struct v4l2_control control;
     
-    // Reinitialize mmap
+    // Reset bitrate
+    control.id = V4L2_CID_MPEG_VIDEO_BITRATE;
+    control.value = VIDEO_BITRATE;
+    if (ioctl(fd, VIDIOC_S_CTRL, &control) == -1) {
+        logMessage("Failed to reset bitrate: " + std::string(strerror(errno)));
+    }
+
+    // Reset GOP size
+    control.id = V4L2_CID_MPEG_VIDEO_H264_I_PERIOD;
+    control.value = GOP_SIZE;
+    if (ioctl(fd, VIDIOC_S_CTRL, &control) == -1) {
+        logMessage("Failed to reset GOP size: " + std::string(strerror(errno)));
+    }
+
+    // Reset H.264 profile
+    control.id = V4L2_CID_MPEG_VIDEO_H264_PROFILE;
+    control.value = V4L2_MPEG_VIDEO_H264_PROFILE_HIGH;
+    if (ioctl(fd, VIDIOC_S_CTRL, &control) == -1) {
+        logMessage("Failed to reset H.264 profile: " + std::string(strerror(errno)));
+    }
+
+    // 6. Reinitialize mmap
+    n_buffers = 0;
     if (!initializeMmap()) {
-        logMessage("Failed to reinitialize mmap during reset.");
+        logMessage("Failed to reinitialize mmap during reset");
         return false;
     }
-    
-    logMessage("Successfully reset video capture.");
+
+    // 7. Reset frame rate
+    struct v4l2_streamparm streamparm = {0};
+    streamparm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    streamparm.parm.capture.timeperframe.numerator = FRAME_RATE_NUMERATOR;
+    streamparm.parm.capture.timeperframe.denominator = FRAME_RATE_DENOMINATOR;
+    if (ioctl(fd, VIDIOC_S_PARM, &streamparm) == -1) {
+        logMessage("Failed to reset frame rate: " + std::string(strerror(errno)));
+    }
+
+    logMessage("Successfully completed comprehensive device reset");
     return true;
 }
 
