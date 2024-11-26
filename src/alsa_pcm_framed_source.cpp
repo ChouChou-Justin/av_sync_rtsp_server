@@ -18,7 +18,7 @@ alsaPcmFramedSource::alsaPcmFramedSource(UsageEnvironment& env, alsaCapture* cap
     gettimeofday(&fInitialTime, NULL);
     
 
-    logMessage("Audio timing: " + std::to_string(TIMESTAMP_INCREMENT) + " ticks per packet");
+    // logMessage("Audio timing: " + std::to_string(TIMESTAMP_INCREMENT) + " ticks per packet");
 }
 
 alsaPcmFramedSource::~alsaPcmFramedSource() {

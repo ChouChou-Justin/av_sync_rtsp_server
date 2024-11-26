@@ -18,12 +18,16 @@ v4l2H264MediaSubsession::~v4l2H264MediaSubsession() {
 
 FramedSource* v4l2H264MediaSubsession::createNewStreamSource(unsigned clientSessionId, unsigned& estBitrate) {
     estBitrate = 1000;
-    
+    logMessage("===========================================================");
     logMessage("Creating stream source for session: " + std::to_string(clientSessionId));
     
     // Force new SPS/PPS extraction for each session
     fCapture->stopCapture();
+    usleep(100000);  // 100ms delay
     fCapture->clearSpsPps();
+    usleep(100000);  // 100ms delay
+    fCapture->reset();
+    usleep(100000);  // 100ms delay
     fCapture->startCapture();
 
     if (!fCapture->extractSpsPpsImmediate()) {

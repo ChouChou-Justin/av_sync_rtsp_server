@@ -88,6 +88,7 @@ int main(int argc, char** argv) {
 
         logMessage("Successfully initialize RTSP server.");
         logMessage("Use Ctrl-C to exit.");
+        logMessage("===========================================================");
 
         // Run the event loop
         serverManager->runEventLoop(&shouldExit);

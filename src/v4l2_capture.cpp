@@ -207,7 +207,7 @@ bool v4l2Capture::stopCapture() {
 }
 
 bool v4l2Capture::reset() {    
-    logMessage("Attempting comprehensive device reset...");
+    logMessage("Starting comprehensive device reset.");
 
     // 1. Stop streaming with proper error handling
     enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -292,7 +292,7 @@ bool v4l2Capture::reset() {
         logMessage("Failed to reset frame rate: " + std::string(strerror(errno)));
     }
 
-    logMessage("Successfully completed comprehensive device reset");
+    logMessage("Successfully completed comprehensive device reset.");
     return true;
 }
 
